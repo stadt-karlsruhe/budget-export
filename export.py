@@ -4,6 +4,7 @@
 from __future__ import (absolute_import, division, print_function,
                         unicode_literals)
 
+from decimal import Decimal
 import re
 
 from docx import Document
@@ -46,44 +47,88 @@ def split(s, maxsplit=None):
     return re.split(r'\s+', s.strip(), maxsplit=maxsplit, flags=re.UNICODE)
 
 
-def extract_gesamtergebnishaushalt(data):
+def parse_amount(s):
     '''
-    Extract a "Gesamtergebnishaushalt" from tabular data.
+    Parse a German amount string.
+    '''
+    parts = s.replace('.', '').split(',')
+    if len(parts) == 1:
+        parts.append('00')
+    parts[1] = parts[1].ljust(2, '0')[:2]
+    return Decimal('.'.join(parts))
 
-    ``data`` is the data from a "Gesamtergebnishaushalt" table as
-    extracted by ``extract_table``.
 
-    Returns a list of positions. Each position has a number, a sign, a
-    title, a list of children and a list values. Each value has a type,
-    a year, and an actual value.
+def parse_int(s):
+    '''
+    Parse an int from a string, returns ``None`` for empty strings.
+    '''
+    if not s:
+        return None
+    return int(s)
+
+
+KONTOGRUPPE_HEADER = 'Kto.\nGr.'
+
+
+def extract_ergebnishaushalt(data):
+    '''
+    Extract an "Ergebnishaushalt" from tabular data.
+
+    ``data`` is the data from a "Ergebnishaushalt" table as extracted by
+    ``extract_table``. Both "Gesamtergebnishaushalt" and
+    Teilergebnishaushalt" tables are supported.
+
+    Returns a list of positions. Each position has a number, a sign, an
+    optional "Kontogruppe", a title, a list of children and a list
+    values. Each value has a type, a year, and an amount.
 
     The list of children may be empty. If it's not then the position's
     values are the sums of the corresponding values of its children. In
     that case, each child has a title and its own list of values.
     '''
     header = data[0]
+    has_kontogruppe_column = header[1] == KONTOGRUPPE_HEADER
     years = []
     types = []
-    for cell in header[3:]:
+    if has_kontogruppe_column:
+        first_value_column = 4
+    else:
+        first_value_column = 3
+    for cell in header[first_value_column:]:
         type, year, _ = split(cell, 2)
-        years.append(year)
+        years.append(parse_int(year))
         types.append(type.lower())
+
+    def parse_row(row):
+        record = {'number': parse_int(row[0])}
+        if has_kontogruppe_column:
+            record['kontogruppe'] = parse_int(row[1])
+            offset = 2
+        else:
+            record['kontogruppe'] = None
+            offset = 1
+        record['sign'] = row[0 + offset]
+        record['title'] = row[1 + offset]
+        record['values'] = values = []
+        for i, cell in enumerate(row[2 + offset:]):
+            values.append({'type': types[i], 'year': years[i],
+                           'amount': parse_amount(cell)})
+        return record
+
     positions = []
     position = None
     for row in data[2:]:  # The second row is part of the header
-        number = row[0]
-        if number:
-            position = {'number': number, 'sign': row[1], 'children': []}
+        record = parse_row(row)
+        if record['number']:
+            assert record['sign']
+            record['children'] = []
+            position = record
             positions.append(position)
-            record = position
         else:
-            record = {}
+            assert not record.pop('sign')
+            assert not record.pop('kontogruppe')
             position['children'].append(record)
         assert position is not None
-        record['title'] = row[2]
-        record['values'] = values = []
-        for i, cell in enumerate(row[3:]):
-            values.append({'type': types[i], 'year': years[i], 'value': cell})
     return positions
 
 
