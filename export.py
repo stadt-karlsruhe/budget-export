@@ -7,6 +7,7 @@ from __future__ import (absolute_import, division, print_function,
 from decimal import Decimal
 import re
 
+from backports import csv
 from docx import Document
 from docx.table import Table as WordTable
 from docx.text.paragraph import Paragraph
@@ -183,10 +184,40 @@ class Table(list):
                 position = record
                 self.append(position)
             else:
-                assert not record.pop('sign')
-                assert not record.pop('kontogruppe', None)
+                assert not record['sign']
                 position['children'].append(record)
             assert position is not None
+
+    def dump_csv(self, writer, additional_columns=None, meta_columns=None,
+                 include_summaries=False):
+        if additional_columns is None:
+            additional_columns = []
+        if meta_columns is None:
+            meta_columns = [c[0] for c in self._meta_columns.itervalues()]
+
+        def dump_record(record, parent=None):
+            fields = list(additional_columns)
+            for key in meta_columns:
+                value = record.get(key)
+                if (not value) and (not include_summaries) and parent:
+                    # Inherit from parent
+                    value = parent.get(key)
+                elif (key == 'title') and (not include_summaries) and parent:
+                    value = '{}: {}'.format(parent['title'], value)
+                fields.append(value)
+            for value in record['values']:
+                writer.writerow(fields + [value['year'], value['type'], value['amount']])
+
+        for position in self:
+            if (position['sign'] == '=') and not include_summaries:
+                continue
+            if position['children']:
+                if include_summaries:
+                    dump_record(position)
+                for child in position['children']:
+                    dump_record(child, position)
+            else:
+                dump_record(position)
 
 
 class ErgebnishaushaltTable(Table):
@@ -353,6 +384,7 @@ class _HeadingState(object):
 
 
 if __name__ == '__main__':
+    import io
     import sys
     from pprint import pprint
 
@@ -376,7 +408,8 @@ if __name__ == '__main__':
                     # Assume it's a sub-table of an Investitionsübersicht
                     tables[-1].append_data(data)
                 else:
-                    table.teilhaushalt = headings.teilhaushalt['id']
+                    if headings.teilhaushalt:
+                        table.teilhaushalt = headings.teilhaushalt['id']
                     if headings.produktbereich:
                         table.produktbereich = headings.produktbereich['id']
                     if headings.produktgruppe:
@@ -400,4 +433,66 @@ if __name__ == '__main__':
         print('')
         print('-' * 70)
         print('')
+
+    # Fix https://github.com/ryanhiebert/backports.csv/issues/14
+    import numbers
+    csv.number_types = (numbers.Number,)
+
+    csv_options = {'delimiter': ';', 'quoting': csv.QUOTE_NONNUMERIC}
+
+    def dump_csv(filename, table_filter, header, meta_columns, additional_fields=None):
+        '''
+        Dump tables to a CSV file.
+
+        ``filename`` is the name of the file.
+
+        ``table_filter`` is a callback that gets a ``Table`` instance
+        and returns ``True`` if the table should be dumped.
+
+        ``header`` is a list of header labels for the first row of the
+        CSV file.
+
+        ``meta_columns`` is a list of the keys of the meta column which
+        should be exported from the table. Note that value columns are
+        always exported.
+
+        ``additional_fields`` is an optional callback that gets a a
+        ``Table`` instance and returns a list of additional fields.
+        These fields are prefixed to the fields of each row in the
+        table.
+        '''
+        with io.open(filename, 'w') as f:
+            writer = csv.writer(f, **csv_options)
+            writer.writerow(header)
+            for table in tables:
+                if table_filter(table):
+                    if additional_fields:
+                        add_cols = additional_fields(table)
+                    else:
+                        add_cols = None
+                    table.dump_csv(writer, meta_columns=meta_columns,
+                                   additional_columns=add_cols)
+
+    dump_csv('gesamtergebnishaushalt.csv',
+             lambda t: isinstance(t, ErgebnishaushaltTable) and not t.teilhaushalt,
+             ['TITEL', 'JAHR', 'TYP', 'BETRAG'],
+             ['title'])
+
+    dump_csv('teilergebnishaushalte.csv',
+             lambda t: isinstance(t, ErgebnishaushaltTable) and t.teilhaushalt,
+             ['TEILHAUSHALT', 'PRODUKTBEREICH', 'PRODUKTGRUPPE', 'KONTOGRUPPE',
+              'TITEL', 'JAHR', 'TYP', 'BETRAG'],
+             ['kontogruppe', 'title'],
+             lambda t: [t.teilhaushalt, t.produktbereich, t.produktgruppe])
+
+    dump_csv('gesamtfinanzshaushalt.csv',
+             lambda t: isinstance(t, FinanzhaushaltTable) and not t.teilhaushalt,
+             ['TITEL', 'JAHR', 'TYP', 'BETRAG'],
+             ['title'])
+
+    dump_csv('teilfinanzhaushalte.csv',
+             lambda t: isinstance(t, FinanzhaushaltTable) and t.teilhaushalt,
+             ['TEILHAUSHALT', 'TITEL', 'JAHR', 'TYP', 'BETRAG'],
+             ['title'],
+             lambda t: [t.teilhaushalt])
 
