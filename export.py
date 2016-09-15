@@ -188,6 +188,16 @@ class Table(list):
                 position['children'].append(record)
             assert position is not None
 
+    def _csv_records(self):
+        '''
+        Yield records for dumping to CSV.
+
+        This method allows subclasses whose rows do not follow the
+        standard "Position + optional children" pattern to convert their
+        rows into something suitable for CSV export.
+        '''
+        return iter(self)
+
     def dump_csv(self, writer, additional_columns=None, meta_columns=None,
                  include_summaries=False):
         if additional_columns is None:
@@ -208,16 +218,16 @@ class Table(list):
             for value in record['values']:
                 writer.writerow(fields + [value['year'], value['type'], value['amount']])
 
-        for position in self:
-            if (position['sign'] == '=') and not include_summaries:
+        for record in self._csv_records():
+            if (record['sign'] == '=') and not include_summaries:
                 continue
-            if position['children']:
+            if record['children']:
                 if include_summaries:
-                    dump_record(position)
-                for child in position['children']:
-                    dump_record(child, position)
+                    dump_record(record)
+                for child in record['children']:
+                    dump_record(child, record)
             else:
-                dump_record(position)
+                dump_record(record)
 
 
 class ErgebnishaushaltTable(Table):
@@ -305,6 +315,14 @@ class InvestitionsuebersichtTable(Table):
         tables then can be added to that table via ``append_data``.
         '''
         self._parse_body(data)
+
+    def _csv_records(self):
+        for project in self:
+            for position in project['positions']:
+                record = position.copy()
+                record['project_id'] = project['id']
+                record['project_title'] = project['title']
+                yield record
 
 
 def extract_data(table):
@@ -496,3 +514,9 @@ if __name__ == '__main__':
              ['title'],
              lambda t: [t.teilhaushalt])
 
+    dump_csv('investitionsuebersichten.csv',
+             lambda t: isinstance(t, InvestitionsuebersichtTable),
+             ['TEILHAUSHALT', 'PROJEKTNUMMER', 'PROJEKT', 'TITEL', 'JAHR',
+              'TYP', 'BETRAG'],
+             ['project_id', 'project_title', 'title'],
+             lambda t: [t.teilhaushalt])
