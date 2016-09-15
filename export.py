@@ -67,69 +67,117 @@ def parse_int(s):
     return int(s)
 
 
-KONTOGRUPPE_HEADER = 'Kto.\nGr.'
-
-
-def extract_ergebnishaushalt(data):
+class Table(list):
     '''
-    Extract an "Ergebnishaushalt" from tabular data.
+    Base class for extracted tables.
 
-    ``data`` is the data from a "Ergebnishaushalt" table as extracted by
-    ``extract_table``. Both "Gesamtergebnishaushalt" and
-    Teilergebnishaushalt" tables are supported.
+    This class and its subclass encapsulate the parsing of the
+    respective table layouts. The extracted data is represented as a
+    list of positions, hence this class is a subclass of ``list``.
 
-    Returns a list of positions. Each position has a number, a sign, an
-    optional "Kontogruppe", a title, a list of children and a list
-    values. Each value has a type, a year, and an amount.
+    Parsing is split over several methods to allow for customization by
+    subclasses:
 
-    The list of children may be empty. If it's not then the position's
-    values are the sums of the corresponding values of its children. In
-    that case, each child has a title and its own list of values.
+    - The entry point for parsing is ``_parse``, which is called by
+      ``__init__`` with the table data. It first calls
+      ``_parse_non_value_headers`` and ``_parse_value_headers`` before
+      using ``_parse_row`` to parse the individual rows and group them
+      into positions and their children.
+
+    - ``_parse_non_value_headers`` must be implemented by subclasses. It
+      receives the first row of the data and must set
+      ``self._non_value_columns`` to a list of tuples. Each tuple
+      corresponds to a non-value column and consists of a key under
+      which the column's values are stored and a transform function for
+      transforming the values (for example to parse numbers). The
+      transform function can be ``None`` in which case the value is
+      stored as text. The information from ``_non_value_columns`` is
+      later used by ``_parse_row`` to identify and extract the data from
+      these columns.
+
+    - ``_parse_value_headers`` receives the remaining columns in the
+      header and uses them to set ``self._types`` and ``self._years`` to
+      lists containing the value column's types and years, respectively.
     '''
-    header = data[0]
-    has_kontogruppe_column = header[1] == KONTOGRUPPE_HEADER
-    years = []
-    types = []
-    if has_kontogruppe_column:
-        first_value_column = 4
-    else:
-        first_value_column = 3
-    for cell in header[first_value_column:]:
-        type, year, _ = split(cell, 2)
-        years.append(parse_int(year))
-        types.append(type.lower())
 
-    def parse_row(row):
-        record = {'number': parse_int(row[0])}
-        if has_kontogruppe_column:
-            record['kontogruppe'] = parse_int(row[1])
-            offset = 2
-        else:
-            record['kontogruppe'] = None
-            offset = 1
-        record['sign'] = row[0 + offset]
-        record['title'] = row[1 + offset]
-        record['values'] = values = []
-        for i, cell in enumerate(row[2 + offset:]):
-            values.append({'type': types[i], 'year': years[i],
+    def __init__(self, data):
+        super(Table, self).__init__()
+        self._parse(data)
+
+    def _parse_non_value_headers(self, header):
+        raise NotImplementedError('Must be implemented by subclass')
+
+    def _parse_value_headers(self, headers):
+        self._years = []
+        self._types = []
+        for cell in headers:
+            type, year, _ = split(cell, 2)
+            self._types.append(type.lower())
+            self._years.append(parse_int(year))
+        #print(self._types)
+        #print(self._years)
+
+    def _parse_row(self, row):
+        values = []
+        record = {'values': values}
+        for i, (key, transform) in enumerate(self._non_value_columns):
+            value = row[i]
+            if transform:
+                value = transform(value)
+            record[key] = value
+        for j, cell in enumerate(row[i + 1:]):
+            values.append({'type': self._types[j], 'year': self._years[j],
                            'amount': parse_amount(cell)})
         return record
 
-    positions = []
-    position = None
-    for row in data[2:]:  # The second row is part of the header
-        record = parse_row(row)
-        if record['number']:
-            assert record['sign']
-            record['children'] = []
-            position = record
-            positions.append(position)
-        else:
-            assert not record.pop('sign')
-            assert not record.pop('kontogruppe')
-            position['children'].append(record)
-        assert position is not None
-    return positions
+    def _parse(self, data):
+        header = data[0]
+        self._parse_non_value_headers(header)
+        self._parse_value_headers(header[len(self._non_value_columns):])
+        position = None
+        for row in data[2:]:  # The second row is part of the header
+            record = self._parse_row(row)
+            if record['number']:
+                assert record['sign']
+                record['children'] = []
+                position = record
+                self.append(position)
+            else:
+                assert not record.pop('sign')
+                assert not record.pop('kontogruppe', None)
+                position['children'].append(record)
+            assert position is not None
+
+
+class ErgebnishaushaltTable(Table):
+
+    _KONTOGRUPPE_HEADER = 'Kto.\nGr.'
+
+    def _parse_non_value_headers(self, header):
+        self._non_value_columns = [('number', parse_int)]
+        if header[1] == self._KONTOGRUPPE_HEADER:
+            self._non_value_columns.append(('kontogruppe', None))
+        self._non_value_columns.extend([
+            ('sign', None),
+            ('title', None),
+        ])
+
+    def _parse_row(self, row):
+        record = super(ErgebnishaushaltTable, self)._parse_row(row)
+        # In the Gesamtergebnishaushalt there's no Kontogruppe, so we add the
+        # field in case it's missing to get a consistent interface.
+        record.setdefault('kontogruppe', None)
+        return record
+
+
+class FinanzhaushaltTable(Table):
+
+    def _parse_non_value_headers(self, header):
+        self._non_value_columns = [
+            ('number', parse_int),
+            ('sign', None),
+            ('title', None)
+        ]
 
 
 def extract_table(table):
@@ -137,6 +185,15 @@ def extract_table(table):
     for row in table.rows:
         data.append([cell.text.strip() for cell in row.cells])
     return data
+
+
+def convert_table(table):
+    data = extract_table(table)
+    if 'finanzhaushalt' in data[0][2]:
+        return FinanzhaushaltTable(data)
+    else:
+        return ErgebnishaushaltTable(data)
+
 
 if __name__ == '__main__':
     import sys
@@ -146,7 +203,6 @@ if __name__ == '__main__':
     doc = Document(filename)
 
     for table in doc.tables:
-        data = extract_table(table)
-        result = extract_gesamtergebnishaushalt(data)
+        result = convert_table(table)
         pprint(result)
         print('')
