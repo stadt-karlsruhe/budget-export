@@ -8,6 +8,8 @@ from decimal import Decimal
 import re
 
 from docx import Document
+from docx.table import Table as WordTable
+from docx.text.paragraph import Paragraph
 
 
 # Note: German technical terms (like "Gesamtergebnishaushalt") were not
@@ -33,6 +35,34 @@ from docx import Document
 # the previously listed records. These summary records can be recognized
 # by having a "=" as their sign.
 
+
+# Adapated from https://github.com/python-openxml/python-docx/issues/276
+def iter_block_items(parent):
+    '''
+    Generate a reference to each paragraph and table child within *parent*,
+    in document order. Each returned value is an instance of either Table or
+    Paragraph. *parent* would most commonly be a reference to a main
+    Document object, but also works for a _Cell object, which itself can
+    contain paragraphs and tables.
+    '''
+    from docx.document import Document as _Document
+    from docx.oxml.text.paragraph import CT_P
+    from docx.oxml.table import CT_Tbl
+    from docx.table import _Cell
+
+    if isinstance(parent, _Document):
+        parent_elm = parent.element.body
+    elif isinstance(parent, _Cell):
+        parent_elm = parent._tc
+    else:
+        raise ValueError('Unknown parent class {}'.format(
+                         parent.__class__.__name__))
+
+    for child in parent_elm.iterchildren():
+        if isinstance(child, CT_P):
+            yield Paragraph(child, parent)
+        elif isinstance(child, CT_Tbl):
+            yield WordTable(child, parent)
 
 
 def split(s, maxsplit=None):
@@ -101,9 +131,13 @@ class Table(list):
       header and uses them to set ``self._types`` and ``self._years`` to
       lists containing the value column's types and years, respectively.
     '''
-    def __init__(self, data):
+    def __init__(self, data, teilhaushalt=None, produktbereich=None,
+                 produktgruppe=None):
         super(Table, self).__init__()
         self._parse(data)
+        self.teilhaushalt = teilhaushalt
+        self.produktbereich = produktbereich
+        self.produktgruppe = produktgruppe
 
     def _parse_meta_headers(self, header):
         raise NotImplementedError('Must be implemented in subclass')
@@ -261,26 +295,105 @@ def convert_data(data):
         raise ValueError('Unknown table type.')
 
 
+class _HeadingState(object):
+    '''
+    A state machine for tracking the information from the headings.
+
+    The headings contain information on which Teilhaushalt,
+    Produktbereich, and Produktgruppe a table belongs to. However,
+    the structure of the headings does not reflect that directly.
+    Instead, their meaning has to be inferred from their order and
+    their content. This class contains the necessary logic for this.
+    '''
+    def __init__(self):
+        self.reset()
+        self.teilhaushalte = {}
+
+    def reset(self):
+        self.teilhaushalt = None
+        self.produktbereich = None
+        self.produktgruppe = None
+
+    def register_heading(self, text):
+        '''
+        Register a heading from the document.
+
+        ``text`` is the text of the heading.
+        '''
+        text = text.strip()
+        if not text:
+            return
+        parts = split(text, 1)
+        if len(parts) != 2:
+            return
+        id, title = parts
+        if id.startswith('THH'):
+            id = id[3:]
+            self.teilhaushalt = self.teilhaushalte.setdefault(
+                    id, {'id': id, 'title': title, 'produktbereiche': {}})
+            self.produktbereich = None
+            self.produktgruppe = None
+        elif (
+            self.teilhaushalt is not None
+            and self.produktbereich is None
+            and len(id) == 2
+            and id.isdigit()
+        ):
+            self.produktbereich = self.teilhaushalt['produktbereiche'].setdefault(
+                    id, {'id': id, 'title': title, 'produktgruppen': {}})
+            self.produktgruppe = None
+        elif (
+            self.produktbereich is not None
+            and self.produktgruppe is None
+            and len(id) == 4
+            and id.isdigit()
+        ):
+            self.produktgruppe = self.produktbereich['produktgruppen'].setdefault(
+                    id, {'id': id, 'title': title})
+
+
 if __name__ == '__main__':
     import sys
     from pprint import pprint
 
     filenames = sys.argv[1:]
 
+    headings = _HeadingState()
+
     tables = []
     for filename in filenames:
         print('Loading {}'.format(filename))
         doc = Document(filename)
-        for table in doc.tables:
-            sys.stdout.write('.')
-            sys.stdout.flush()
-            data = extract_data(table)
-            try:
-                tables.append(convert_data(data))
-            except ValueError:
-                # Assume it's a sub-table of an Investitionsübersicht
-                tables[-1].append_data(data)
+        headings.reset()
+        for block in iter_block_items(doc):
+            if isinstance(block, WordTable):
+                sys.stdout.write('.')
+                sys.stdout.flush()
+                data = extract_data(block)
+                try:
+                    table = convert_data(data)
+                except ValueError:
+                    # Assume it's a sub-table of an Investitionsübersicht
+                    tables[-1].append_data(data)
+                else:
+                    table.teilhaushalt = headings.teilhaushalt['id']
+                    if headings.produktbereich:
+                        table.produktbereich = headings.produktbereich['id']
+                    if headings.produktgruppe:
+                        table.produktgruppe = headings.produktgruppe['id']
+                    tables.append(table)
+            else:
+                headings.register_heading(block.text)
         print('')
+
+
+    print('')
+    print('-' * 70)
+    print('')
+    pprint(headings.teilhaushalte)
+    print('')
+    print('-' * 70)
+    print('')
 
     for table in tables:
         pprint(table)
