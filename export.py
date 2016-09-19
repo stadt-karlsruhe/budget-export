@@ -115,22 +115,23 @@ class Table(list):
       them into positions and their children.
 
     - ``_parse_headers`` receives the first row of the table and passes
-      it on to ``_parse_non_value_headers`` before calling ``_parse_value_headers``
+      it on to ``_parse_meta_headers`` before calling
+      ``_parse_value_headers``
 
-    - ``_parse_non_value_headers`` must be implemented by subclasses. It
+    - ``_parse_meta_headers`` must be implemented by subclasses. It
       receives the first row of the data and must set
-      ``self._non_value_columns`` to a list of tuples. Each tuple
-      corresponds to a non-value column and consists of a key under
-      which the column's values are stored and a transform function for
-      transforming the values (for example to parse numbers). The
-      transform function can be ``None`` in which case the value is
-      stored as text. The information from ``_non_value_columns`` is
-      later used by ``_parse_row`` to identify and extract the data from
-      these columns.
+      ``self._meta_columns`` to a dict that maps column indices to
+      2-tuples containing the key under which the column's values are
+      stored and a transform function for transforming the values (for
+      example to parse numbers). The transform function can be ``None``
+      in which case the value is stored as text. The information from
+      ``_meta_columns`` is later used by ``_parse_row`` to identify and
+      extract the data from these columns.
 
     - ``_parse_value_headers`` receives the remaining columns in the
-      header and uses them to set ``self._types`` and ``self._years`` to
-      lists containing the value column's types and years, respectively.
+      header and uses them to set ``self._value_columns`` to a dict that
+      maps column indices to 2-tuples containing the column's type and
+      year.
     '''
     def __init__(self, data, teilhaushalt=None, produktbereich=None,
                  produktgruppe=None):
