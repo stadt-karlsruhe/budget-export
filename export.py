@@ -18,25 +18,6 @@ from docx.text.paragraph import Paragraph
 # translating them would have made that connection harder to understand.
 
 
-# Structure of an "Ergebnishaushalt" table:
-#
-# The first row contains the header.
-#
-# Each following row has an optional running number, a "Kontogruppe"
-# (except in the "Gesamtergebnishaushalt"), an optional sign (only if
-# the row also has a running number), a title, and several value cells
-# whose meaning is described in the corresponding header cell.
-#
-# Some records are split into multiple rows. In that case the first row
-# has a running number, a sign, and value cells containing the sum of
-# its sub-rows. Each sub-row has neither running number nor sign and
-# its value cells contain individual values.
-#
-# Some records do not represent actual positions but instead summarize
-# the previously listed records. These summary records can be recognized
-# by having a "=" as their sign.
-
-
 # Adapated from https://github.com/python-openxml/python-docx/issues/276
 def iter_block_items(parent):
     '''
@@ -408,12 +389,13 @@ if __name__ == '__main__':
     from pprint import pprint
 
     filenames = sys.argv[1:]
-
     headings = _HeadingState()
-
     tables = []
-    for filename in filenames:
-        print('Loading {}'.format(filename))
+    csv_options = {'delimiter': ';', 'quoting': csv.QUOTE_NONNUMERIC}
+
+
+    def load_word_file(filename):
+        print('Loading "{}"'.format(filename))
         doc = Document(filename)
         headings.reset()
         for block in iter_block_items(doc):
@@ -439,26 +421,6 @@ if __name__ == '__main__':
         print('')
 
 
-    print('')
-    print('-' * 70)
-    print('')
-    pprint(headings.teilhaushalte)
-    print('')
-    print('-' * 70)
-    print('')
-
-    for table in tables:
-        pprint(table)
-        print('')
-        print('-' * 70)
-        print('')
-
-    # Fix https://github.com/ryanhiebert/backports.csv/issues/14
-    import numbers
-    csv.number_types = (numbers.Number,)
-
-    csv_options = {'delimiter': ';', 'quoting': csv.QUOTE_NONNUMERIC}
-
     def dump_csv(filename, table_filter, header, meta_columns, additional_fields=None):
         '''
         Dump tables to a CSV file.
@@ -480,6 +442,7 @@ if __name__ == '__main__':
         These fields are prefixed to the fields of each row in the
         table.
         '''
+        print('Exporting data to "{}"'.format(filename))
         with io.open(filename, 'w') as f:
             writer = csv.writer(f, **csv_options)
             writer.writerow(header)
@@ -491,6 +454,13 @@ if __name__ == '__main__':
                         add_cols = None
                     table.dump_csv(writer, meta_columns=meta_columns,
                                    additional_columns=add_cols)
+
+
+    for filename in filenames:
+        if filename.endswith('.docx'):
+            load_word_file(filename)
+        else:
+            print('Skipping "{}"'.format(filename))
 
     dump_csv('gesamtergebnishaushalt.csv',
              lambda t: isinstance(t, ErgebnishaushaltTable) and not t.teilhaushalt,
@@ -521,3 +491,4 @@ if __name__ == '__main__':
               'TYP', 'BETRAG'],
              ['project_id', 'project_title', 'title'],
              lambda t: [t.teilhaushalt])
+
