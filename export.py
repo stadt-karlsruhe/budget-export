@@ -457,10 +457,11 @@ if __name__ == '__main__':
 
 
     for filename in filenames:
-        if filename.endswith('.docx'):
+        if filename.endswith(b'.docx'):
             load_word_file(filename)
         else:
-            print('Skipping "{}"'.format(filename))
+            print('Skipping "{}" (unknown file extension)'.format(
+                  filename.decode(sys.stdin.encoding)))
 
     dump_csv('gesamtergebnishaushalt.csv',
              lambda t: isinstance(t, ErgebnishaushaltTable) and not t.teilhaushalt,
