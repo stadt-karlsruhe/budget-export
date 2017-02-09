@@ -169,16 +169,32 @@ class Table(list):
         self._parse_headers(data[0])
         position = None
         for row in data[2:]:  # The second row is part of the header
+            if not self._does_row_have_values(row):
+                position = None
+                continue
             record = self._parse_row(row)
             if record['number']:
-                assert record['sign']
+                # Row starts a new position
+                if not record['sign']:
+                    position = None
+                    continue
                 record['children'] = []
                 position = record
                 self.append(position)
             else:
+                # Row belongs to previous position
                 assert not record['sign']
                 position['children'].append(record)
             assert position is not None
+
+    def _does_row_have_values(self, row):
+        '''
+        Check if a row has entries in the value columns.
+        '''
+        for i in self._value_columns:
+            if row[i]:
+                return True
+        return False
 
     def _csv_records(self):
         '''
