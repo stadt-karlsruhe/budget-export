@@ -59,6 +59,16 @@ def split(s, maxsplit=None):
     return re.split(r'\s+', s.strip(), maxsplit=maxsplit, flags=re.UNICODE)
 
 
+def clean_string(s):
+    '''
+    Clean a string.
+
+    Replaces all adjacent whitespace by a single space and strips
+    leading and trailing whitespace.
+    '''
+    return re.sub(r'\s+', ' ', s.strip())
+
+
 def parse_amount(s):
     '''
     Parse a German amount string.
@@ -136,7 +146,7 @@ class Table(list):
                 except ValueError:
                     # Not a year
                     continue
-                self._value_columns[i] = (parts[0], year)
+                self._value_columns[i] = (clean_string(parts[0]), year)
 
     def _parse_headers(self, header):
         self._parse_meta_headers(header)
@@ -226,7 +236,7 @@ class ErgebnishaushaltTable(Table):
         else:
             offset = 0
         self._meta_columns[1 + offset] = ('sign', None)
-        self._meta_columns[2 + offset] = ('title', None)
+        self._meta_columns[2 + offset] = ('title', clean_string)
 
     def _parse_row(self, row):
         record = super(ErgebnishaushaltTable, self)._parse_row(row)
@@ -242,7 +252,7 @@ class FinanzhaushaltTable(Table):
         self._meta_columns = {
             0: ('number', parse_int),
             1: ('sign', None),
-            2: ('title', None),
+            2: ('title', clean_string),
         }
 
 
@@ -252,7 +262,7 @@ class InvestitionsuebersichtTable(Table):
         self._meta_columns = {
             0: ('number', parse_int),
             1: ('sign', None),
-            2: ('title', None),
+            2: ('title', clean_string),
         }
 
     def _parse(self, data):
