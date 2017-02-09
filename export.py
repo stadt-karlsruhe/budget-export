@@ -459,7 +459,7 @@ if __name__ == '__main__':
 
     headings = _HeadingState()
     tables = []
-    csv_options = {'delimiter': ';', 'quoting': csv.QUOTE_NONNUMERIC}
+    csv_options = {'delimiter': ',', 'quoting': csv.QUOTE_NONNUMERIC}
 
 
 
