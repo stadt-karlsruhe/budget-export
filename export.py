@@ -158,6 +158,14 @@ class Table(list):
         self._parse_value_headers(header)
 
     def _parse_row(self, row):
+        '''
+        Parse a single, non-header row of the table.
+
+        Returns a dict that contains the row's entries for the meta-
+        columns (as given by ``self._meta_columns``) and a ``values``
+        entry which contains a list of dicts representing the entries
+        in the value columns (as given by ``self._value_columns``).
+        '''
         values = []
         record = {'values': values}
         for i, (key, transform) in self._meta_columns.iteritems():
@@ -353,7 +361,14 @@ def extract_data(table):
     return data
 
 
-def convert_data(data):
+def table_from_data(data):
+    '''
+    Factory that converts raw table data to ``*Table`` instances.
+
+    Returns an instance of ``FinanzhaushaltTable``,
+    ``InvestitionsuebersichtTable``, or ``ErgebnishaushaltTable``
+    depending on the given data.
+    '''
     if 'finanzhaushalt' in data[0][2].lower():
         return FinanzhaushaltTable(data)
     elif 'investitionsübersicht' in data[0][2].lower():
@@ -449,6 +464,11 @@ if __name__ == '__main__':
 
 
     def load_word_file(filename):
+        '''
+        Load data from a Word file.
+
+        Updates the ``headings`` and ``tables`` variables.
+        '''
         log.info('Loading "{}"'.format(filename))
         doc = Document(filename)
         headings.reset()
@@ -456,7 +476,7 @@ if __name__ == '__main__':
             if isinstance(block, WordTable):
                 data = extract_data(block)
                 try:
-                    table = convert_data(data)
+                    table = table_from_data(data)
                 except ValueError:
                     # Assume it's a sub-table of an Investitionsübersicht
                     tables[-1].append_data(data)
