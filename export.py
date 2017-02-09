@@ -4,6 +4,7 @@
 from __future__ import (absolute_import, division, print_function,
                         unicode_literals)
 
+import logging
 from decimal import Decimal
 import re
 
@@ -16,6 +17,10 @@ from docx.text.paragraph import Paragraph
 # Note: German technical terms (like "Gesamtergebnishaushalt") were not
 # translated because they occur frequently in the original documents and
 # translating them would have made that connection harder to understand.
+
+
+log = logging.getLogger(__name__)
+log.addHandler(logging.NullHandler())
 
 
 # Adapated from https://github.com/python-openxml/python-docx/issues/276
@@ -166,16 +171,24 @@ class Table(list):
         return record
 
     def _parse(self, data):
+        log.debug('Parsing headers')
         self._parse_headers(data[0])
+        log.debug('Meta columns: {}'.format(self._meta_columns))
+        log.debug('Value columns: {}'.format(self._value_columns))
         position = None
         for row in data[2:]:  # The second row is part of the header
+            log.debug('Parsing row {}'.format(row))
             if not self._does_row_have_values(row):
+                log.debug('Row has now values, ignoring it')
                 position = None
                 continue
             record = self._parse_row(row)
+            log.debug('Record: {}'.format(record))
             if record['number']:
                 # Row starts a new position
                 if not record['sign']:
+                    log.warning(('Row {} has a number but no sign, ignoring ' +
+                                 'it.').format(row))
                     position = None
                     continue
                 record['children'] = []
@@ -410,24 +423,37 @@ class _HeadingState(object):
 
 
 if __name__ == '__main__':
+    import argparse
     import io
     import sys
-    from pprint import pprint
 
-    filenames = sys.argv[1:]
+    parser = argparse.ArgumentParser(description='Export budget data to CSV.')
+    parser.add_argument('filenames', metavar='DOCX', nargs='+',
+                        help='Input files (Word .docx format)')
+    parser.add_argument('--verbose', '-v', action='count', help='Increase ' +
+                        'verbosity (can be specified two times)')
+    args = parser.parse_args()
+
+    log.addHandler(logging.StreamHandler())
+    if args.verbose == 0:
+        log.setLevel(logging.WARNING)
+    elif args.verbose == 1:
+        log.setLevel(logging.INFO)
+    elif args.verbose >= 2:
+        log.setLevel(logging.DEBUG)
+
     headings = _HeadingState()
     tables = []
     csv_options = {'delimiter': ';', 'quoting': csv.QUOTE_NONNUMERIC}
 
 
+
     def load_word_file(filename):
-        print('Loading "{}"'.format(filename))
+        log.info('Loading "{}"'.format(filename))
         doc = Document(filename)
         headings.reset()
         for block in iter_block_items(doc):
             if isinstance(block, WordTable):
-                sys.stdout.write('.')
-                sys.stdout.flush()
                 data = extract_data(block)
                 try:
                     table = convert_data(data)
@@ -444,7 +470,6 @@ if __name__ == '__main__':
                     tables.append(table)
             else:
                 headings.register_heading(block.text)
-        print('')
 
 
     def dump_csv(filename, table_filter, header, meta_columns, additional_fields=None):
@@ -468,7 +493,7 @@ if __name__ == '__main__':
         These fields are prefixed to the fields of each row in the
         table.
         '''
-        print('Exporting data to "{}"'.format(filename))
+        log.info('Exporting data to "{}"'.format(filename))
         with io.open(filename, 'w') as f:
             writer = csv.writer(f, **csv_options)
             writer.writerow(header)
@@ -482,11 +507,11 @@ if __name__ == '__main__':
                                    additional_columns=add_cols)
 
 
-    for filename in filenames:
+    for filename in args.filenames:
         if filename.endswith(b'.docx'):
             load_word_file(filename)
         else:
-            print('Skipping "{}" (unknown file extension)'.format(
+            log.warning('Skipping "{}" (unsupported file extension)'.format(
                   filename.decode(sys.stdin.encoding)))
 
     dump_csv('gesamtergebnishaushalt.csv',
