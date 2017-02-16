@@ -132,10 +132,10 @@ class Table(list):
     def __init__(self, data, teilhaushalt=None, produktbereich=None,
                  produktgruppe=None):
         super(Table, self).__init__()
-        self._parse(data)
         self.teilhaushalt = teilhaushalt
         self.produktbereich = produktbereich
         self.produktgruppe = produktgruppe
+        self._parse(data)
 
     def _parse_meta_headers(self, header):
         raise NotImplementedError('Must be implemented in subclass')
@@ -259,28 +259,25 @@ class Table(list):
                 dump_record(record)
 
 
-class ErgebnishaushaltTable(Table):
-
-    _KONTOGRUPPE_HEADER = 'Kto.\nGr.'
+class GesamtergebnishaushaltTable(Table):
 
     def _parse_meta_headers(self, header):
         self._meta_columns = {
             0: ('number', parse_int),
+            1: ('sign', None),
+            2: ('title', None),
         }
-        if header[1] == self._KONTOGRUPPE_HEADER:
-            self._meta_columns[1] = ('kontogruppe', None)
-            offset = 1
-        else:
-            offset = 0
-        self._meta_columns[1 + offset] = ('sign', None)
-        self._meta_columns[2 + offset] = ('title', clean_string)
 
-    def _parse_row(self, row):
-        record = super(ErgebnishaushaltTable, self)._parse_row(row)
-        # In the Gesamtergebnishaushalt there's no Kontogruppe, so we add the
-        # field in case it's missing to get a consistent interface.
-        record.setdefault('kontogruppe', None)
-        return record
+
+class TeilergebnishaushaltTable(Table):
+
+    def _parse_meta_headers(self, header):
+        self._meta_columns = {
+            0: ('number', parse_int),
+            1: ('kontogruppe', None),
+            2: ('sign', None),
+            3: ('title', None),
+        }
 
 
 class FinanzhaushaltTable(Table):
@@ -333,18 +330,6 @@ class InvestitionsuebersichtTable(Table):
                     assert not record.pop('kontogruppe', None)
                     position['children'].append(record)
 
-    def append_data(self, data):
-        '''
-        Add more data for this table.
-
-        If a Investitionsübersicht contains multiple projects then each
-        project is exported into a separate Word table. Only the first
-        of these has a header and should be parsed by creating a new
-        ``InvestitionsuebersichtTable`` instance. The other, header-less
-        tables then can be added to that table via ``append_data``.
-        '''
-        self._parse_body(data)
-
     def _csv_records(self):
         for project in self:
             for position in project['positions']:
@@ -367,23 +352,27 @@ def extract_data(table):
     return data
 
 
+class BudgetExportException(Exception):
+    pass
+
+class UnknownTableTypeException(BudgetExportException):
+    pass
+
+
 def table_from_data(data):
     '''
-    Factory that converts raw table data to ``*Table`` instances.
-
-    Returns an instance of ``FinanzhaushaltTable``,
-    ``InvestitionsuebersichtTable``, or ``ErgebnishaushaltTable``
-    depending on the given data.
+    Factory that converts raw table data to a ``Table`` instance.
     '''
     if 'finanzhaushalt' in data[0][2].lower():
         return FinanzhaushaltTable(data)
     elif 'investitionsübersicht' in data[0][2].lower():
         return InvestitionsuebersichtTable(data)
-    elif ('ergebnishaushalt' in data[0][2].lower()
-            or 'ergebnishaushalt' in data[0][3].lower()):
-        return ErgebnishaushaltTable(data)
+    elif 'teilergebnishaushalt' in data[0][3].lower():
+        return TeilergebnishaushaltTable(data)
+    elif 'gesamtergebnishaushalt' in data[0][2].lower():
+        return GesamtergebnishaushaltTable(data)
     else:
-        raise ValueError('Unknown table type.')
+        raise UnknownTableTypeException('Unknown table type.')
 
 
 class _HeadingState(object):
@@ -414,6 +403,7 @@ class _HeadingState(object):
         text = text.strip()
         if not text:
             return
+        log.debug('Heading "{}"'.format(text))
         parts = split(text, 1)
         if len(parts) != 2:
             return
@@ -468,7 +458,6 @@ if __name__ == '__main__':
     csv_options = {'delimiter': ',', 'quoting': csv.QUOTE_NONNUMERIC}
 
 
-
     def load_word_file(filename):
         '''
         Load data from a Word file.
@@ -483,9 +472,8 @@ if __name__ == '__main__':
                 data = extract_data(block)
                 try:
                     table = table_from_data(data)
-                except ValueError:
-                    # Assume it's a sub-table of an Investitionsübersicht
-                    tables[-1].append_data(data)
+                except UnknownTableTypeException:
+                    log.warning('Ignoring unknown table.')
                 else:
                     if headings.teilhaushalt:
                         table.teilhaushalt = headings.teilhaushalt['id']
@@ -557,12 +545,12 @@ if __name__ == '__main__':
                   filename.decode(sys.stdin.encoding)))
 
     dump_tables_to_csv('gesamtergebnishaushalt.csv',
-             lambda t: isinstance(t, ErgebnishaushaltTable) and not t.teilhaushalt,
+             lambda t: isinstance(t, GesamtergebnishaushaltTable),
              ['TITEL', 'JAHR', 'TYP', 'BETRAG'],
              ['title'])
 
     dump_tables_to_csv('teilergebnishaushalte.csv',
-             lambda t: isinstance(t, ErgebnishaushaltTable) and t.teilhaushalt,
+             lambda t: isinstance(t, TeilergebnishaushaltTable),
              ['TEILHAUSHALT', 'PRODUKTBEREICH', 'PRODUKTGRUPPE', 'KONTOGRUPPE',
               'TITEL', 'JAHR', 'TYP', 'BETRAG'],
              ['kontogruppe', 'title'],
