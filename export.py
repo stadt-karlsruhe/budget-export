@@ -355,6 +355,12 @@ class InvestitionsuebersichtTable(Table):
 
 
 def extract_data(table):
+    '''
+    Extract the data from a Word table.
+
+    Returns a list of rows, each of which is a list of cell values as
+    strings.
+    '''
     data = []
     for row in table.rows:
         data.append([cell.text.strip() for cell in row.cells])
@@ -492,7 +498,8 @@ if __name__ == '__main__':
                 headings.register_heading(block.text)
 
 
-    def dump_csv(filename, table_filter, header, meta_columns, additional_fields=None):
+    def dump_tables_to_csv(filename, table_filter, header, meta_columns,
+                           additional_fields=None):
         '''
         Dump tables to a CSV file.
 
@@ -527,6 +534,21 @@ if __name__ == '__main__':
                                    additional_columns=add_cols)
 
 
+    def dump_list_of_teilhaushalte(filename):
+        '''
+        Dump a list of all Teilhaushalte.
+
+        Exports the Teilhaushalte to CSV with their ID and title.
+        '''
+        thhs = sorted(headings.teilhaushalte.itervalues(),
+                      key=lambda thh: thh['id'])
+        with io.open(filename, 'w') as f:
+            writer = csv.writer(f, **csv_options)
+            writer.writerow(['NUMMER', 'TITEL'])
+            for thh in thhs:
+                writer.writerow([thh['id'], thh['title']])
+
+
     for filename in args.filenames:
         if filename.endswith(b'.docx'):
             load_word_file(filename)
@@ -534,33 +556,35 @@ if __name__ == '__main__':
             log.warning('Skipping "{}" (unsupported file extension)'.format(
                   filename.decode(sys.stdin.encoding)))
 
-    dump_csv('gesamtergebnishaushalt.csv',
+    dump_tables_to_csv('gesamtergebnishaushalt.csv',
              lambda t: isinstance(t, ErgebnishaushaltTable) and not t.teilhaushalt,
              ['TITEL', 'JAHR', 'TYP', 'BETRAG'],
              ['title'])
 
-    dump_csv('teilergebnishaushalte.csv',
+    dump_tables_to_csv('teilergebnishaushalte.csv',
              lambda t: isinstance(t, ErgebnishaushaltTable) and t.teilhaushalt,
              ['TEILHAUSHALT', 'PRODUKTBEREICH', 'PRODUKTGRUPPE', 'KONTOGRUPPE',
               'TITEL', 'JAHR', 'TYP', 'BETRAG'],
              ['kontogruppe', 'title'],
              lambda t: [t.teilhaushalt, t.produktbereich, t.produktgruppe])
 
-    dump_csv('gesamtfinanzshaushalt.csv',
+    dump_tables_to_csv('gesamtfinanzshaushalt.csv',
              lambda t: isinstance(t, FinanzhaushaltTable) and not t.teilhaushalt,
              ['TITEL', 'JAHR', 'TYP', 'BETRAG'],
              ['title'])
 
-    dump_csv('teilfinanzhaushalte.csv',
+    dump_tables_to_csv('teilfinanzhaushalte.csv',
              lambda t: isinstance(t, FinanzhaushaltTable) and t.teilhaushalt,
              ['TEILHAUSHALT', 'TITEL', 'JAHR', 'TYP', 'BETRAG'],
              ['title'],
              lambda t: [t.teilhaushalt])
 
-    dump_csv('investitionsuebersichten.csv',
+    dump_tables_to_csv('investitionsuebersichten.csv',
              lambda t: isinstance(t, InvestitionsuebersichtTable),
              ['TEILHAUSHALT', 'PROJEKTNUMMER', 'PROJEKT', 'TITEL', 'JAHR',
               'TYP', 'BETRAG'],
              ['project_id', 'project_title', 'title'],
              lambda t: [t.teilhaushalt])
+
+    dump_list_of_teilhaushalte('teilhaushalte.csv')
 
