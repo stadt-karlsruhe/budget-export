@@ -411,6 +411,7 @@ class _HeadingState(object):
         self.produktbereich = None
         self.produktgruppe = None
         self.verrechnungen = False
+        self.text = ''
 
     def register_heading(self, text):
         '''
@@ -422,6 +423,7 @@ class _HeadingState(object):
         if not text:
             return
         log.debug('Heading "{}"'.format(text))
+        self.text = text
         parts = split(text, 1)
         if len(parts) != 2:
             return
@@ -504,7 +506,8 @@ if __name__ == '__main__':
                 try:
                     table = table_from_data(data)
                 except UnknownTableTypeException:
-                    log.warning('Ignoring unknown table.')
+                    log.warning(('Ignoring unknown table (last heading was ' +
+                                '"{}").').format(headings.text))
                 else:
                     if headings.teilhaushalt:
                         table.teilhaushalt = headings.teilhaushalt['id']
