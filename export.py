@@ -410,6 +410,7 @@ class _HeadingState(object):
         self.teilhaushalt = None
         self.produktbereich = None
         self.produktgruppe = None
+        self.verrechnungen = False
 
     def register_heading(self, text):
         '''
@@ -431,6 +432,15 @@ class _HeadingState(object):
                     id, {'id': id, 'title': title, 'produktbereiche': {}})
             self.produktbereich = None
             self.produktgruppe = None
+            self.verrechnungen = False
+        elif (
+            self.teilhaushalt is not None
+            and self.produktbereich is None
+            and self.produktgruppe is None
+            and parts[0] == '9'
+            and parts[1] == 'Verrechnungen'
+        ):
+            self.verrechnungen = True
         elif (
             self.teilhaushalt is not None
             and self.produktbereich is None
@@ -486,6 +496,10 @@ if __name__ == '__main__':
         headings.reset()
         for block in iter_block_items(doc):
             if isinstance(block, WordTable):
+                if headings.verrechnungen:
+                    log.debug('Ignoring Verrechnungen for THH "{}"'.format(
+                              headings.teilhaushalt['id']))
+                    continue
                 data = extract_data(block)
                 try:
                     table = table_from_data(data)
