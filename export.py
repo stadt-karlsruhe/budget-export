@@ -165,6 +165,8 @@ class Table(list):
         columns (as given by ``self._meta_columns``) and a ``values``
         entry which contains a list of dicts representing the entries
         in the value columns (as given by ``self._value_columns``).
+
+        May return ``None`` if the row should be ignored.
         '''
         values = []
         record = {'values': values}
@@ -176,6 +178,10 @@ class Table(list):
         for i, (type, year) in self._value_columns.iteritems():
             values.append({'type': type, 'year': year,
                            'amount': parse_amount(row[i])})
+        if record['number'] and not record['sign']:
+            log.debug('Row {} has a number but no sign, ignoring it.'.format(
+                      row))
+            return
         return record
 
     def _parse(self, data):
@@ -191,20 +197,21 @@ class Table(list):
                 position = None
                 continue
             record = self._parse_row(row)
+            if record is None:
+                position = None
+                continue
             log.debug('Record: {}'.format(record))
             if record['number']:
                 # Row starts a new position
-                if not record['sign']:
-                    log.warning(('Row {} has a number but no sign, ignoring ' +
-                                 'it.').format(row))
-                    position = None
-                    continue
                 record['children'] = []
                 position = record
                 self.append(position)
             else:
                 # Row belongs to previous position
                 assert not record['sign']
+                if not position:
+                    log.debug('No current position, ignoring row')
+                    continue
                 position['children'].append(record)
             assert position is not None
 
@@ -278,6 +285,16 @@ class TeilergebnishaushaltTable(Table):
             2: ('sign', None),
             3: ('title', None),
         }
+
+    def _parse_row(self, row):
+        record = super(TeilergebnishaushaltTable, self)._parse_row(row)
+        if record is None:
+            return
+        if record['sign'] and not record['kontogruppe']:
+            log.debug(('Row {} has a sign but no Kontogruppe, ignoring ' +
+                       'it.').format(row))
+            return
+        return record
 
 
 class FinanzhaushaltTable(Table):
