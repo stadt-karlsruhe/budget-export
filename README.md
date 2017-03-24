@@ -24,7 +24,11 @@ transparenz@karlsruhe.de if you run into problems.
 
 ## Installation
 
-To install the required Python packages (we recommend using a
+First clone this repository:
+
+    git clone https://github.com/stadt-karlsruhe/budget-export.git
+
+Then install the required Python packages (we recommend using a
 [virtualenv][virtualenv]):
 
     pip install -r requirements.txt
