@@ -34,6 +34,9 @@ from docx.table import Table as WordTable
 from docx.text.paragraph import Paragraph
 
 
+__version__ = '0.1.0'
+
+
 # Note: German technical terms (like "Gesamtergebnishaushalt") were not
 # translated because they occur frequently in the original documents and
 # translating them would have made that connection harder to understand.
